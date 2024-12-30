@@ -11,9 +11,12 @@ GO_BUILDFLAGS+= -tags 'static_build'
 GO_BUILDFLAGS+= -tags 'lambda.norpc,static_build'
 .endif
 
-GO_LDFLAGS=	-s -w -extldflags '-static' \
+GO_LDFLAGS=	-s -w -extldflags -static \
 	-X main.version=$$(${GIT_CMD} tag --contains ${GIT_SHORT_COMMIT_ID} --sort version:refname) \
 	-X main.gitCommit=${GIT_SHORT_COMMIT_ID} \
+	-X main.makeBin=$$(which make) \
 	-X main.DEBUG=0
 
 SRCS+=		main.go
+
+RUN_PARAMETERS?=-ports-dir=/usr/ports-dev -verbose devel/readline

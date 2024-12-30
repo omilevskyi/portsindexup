@@ -43,7 +43,7 @@ GO_BUILDFLAGS+=	${GO_LDFLAGS:D-ldflags "${GO_LDFLAGS}"}
 all: .PHONY build
 
 run: .PHONY .SILENT
-	${GO_CMD} run ${GO_BUILDFLAGS} . $$(find environments -name '*.dot')
+	${GO_CMD} run ${GO_BUILDFLAGS} . ${RUN_PARAMETERS}
 
 tidy: .PHONY
 	${GO_CMD} mod tidy -v

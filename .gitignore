@@ -2,4 +2,5 @@
 *.bak*
 *.orig*
 .build/
+.vscode/
 vendor/

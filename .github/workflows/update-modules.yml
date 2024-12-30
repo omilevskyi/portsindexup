@@ -1,0 +1,51 @@
+---
+name: Update modules
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          show-progress: "false"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache-dependency-path: "go.sum"
+          check-latest: true
+          cache: true
+      - name: go get -u=patch
+        run: go get -u=patch
+      - name: go mod tidy
+        run: go mod tidy
+      - name: Build binary
+        run: |
+          env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -buildvcs=false \
+              -buildmode=exe \
+              -ldflags "-s -w -extldflags '-static'" \
+              -tags 'static_build' \
+              -o bootstrap
+      - name: Run tests
+        run: go test -v ./...
+      - name: Setup git config
+        run: |
+          git config user.email 'github@github.com'
+          git config user.name 'GitHub Build'
+      - name: git checkout -b
+        run: git checkout -b fix/${{ github.run_number }}
+      - name: git commit
+        run: |
+          git commit --all --message 'fix: update module versions ${{ github.run_number }}'
+      - name: git push
+        run: git push --set-upstream origin $(git branch --show-current)
+      - name: Create a PR
+        run: gh pr create --fill
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

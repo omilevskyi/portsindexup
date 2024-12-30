@@ -1,0 +1,32 @@
+---
+name: Check version
+on:
+  push:
+    branches-ignore:
+      - "main"
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          show-progress: "false"
+      - name: Get next version
+        run: |
+          msg=$(git log -1 --format=%B | head -1)
+          if echo "${msg}" | grep --quiet '^fix[^[:space:]:]*:'; then
+            version_bump=patch
+          elif echo "${msg}" | grep --quiet '^feat[^[:space:]:]*:'; then
+            version_bump=minor
+          elif echo "${msg}" | grep --quiet '^BREAKING CHANGE[^[:space:]:]*:'; then
+            version_bump=major
+          else
+            exit 0
+          fi
+          recent_version=$(git tag --sort -version:refname | sed --silent --regexp-extended 's/.*(v[[:digit:].]+)$/\1/p;q')
+          next_version=$(curl --silent https://raw.githubusercontent.com/fsaintjacques/semver-tool/master/src/semver |
+            bash -s bump ${version_bump} ${recent_version:-v0.0.0})
+          test -n "${next_version}" || exit 201

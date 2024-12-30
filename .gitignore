@@ -1,0 +1,5 @@
+*.log
+*.bak*
+*.orig*
+.build/
+vendor/

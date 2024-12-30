@@ -1,0 +1,63 @@
+---
+# https://goreleaser.com/customization/project/
+project_name: portsindexup
+
+# https://goreleaser.com/customization/build/
+builds:
+  - id: "{{ .ProjectName }}"
+    binary: ".build/{{ .ProjectName }}"
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}" # https://goreleaser.com/customization/templates/
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    tags:
+      - static_build
+    ldflags:
+      - -s -w -extldflags -static
+      - -X main.version=v{{ .Version }}
+      - -X main.gitCommit={{ .ShortCommit }}
+    goos:
+      - darwin
+      - freebsd
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goarch: arm64
+        goos: freebsd
+      - goarch: arm64
+        goos: linux
+      - goarch: arm64
+        goos: windows
+
+# https://goreleaser.com/customization/archive/
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: zip
+    strip_binary_directory: true
+    files: []
+
+# https://goreleaser.com/customization/checksum/
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+  disable: true
+
+# https://goreleaser.com/customization/changelog/
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - Merge pull request
+      - Merge branch
+
+# https://goreleaser.com/customization/release/
+release:
+  # draft: true # If set to true, will not auto-publish the release
+  replace_existing_draft: true

@@ -1,0 +1,34 @@
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: destroyed-symlinks
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args:
+          - --markdown-linebreak-ext=md
+      - id: check-yaml
+      - id: sort-simple-yaml
+      - id: check-added-large-files
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.17.0
+    hooks:
+      - id: markdownlint-cli2
+  - repo: https://github.com/zricethezav/gitleaks
+    rev: v8.22.0
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.30.0
+    hooks:
+      - id: check-github-actions
+      - id: check-github-workflows
+  - repo: https://github.com/homebysix/pre-commit-macadmin
+    rev: v1.17.0
+    hooks:
+      - id: check-git-config-email
+        args: ["--domains", "aerlingus.com"]

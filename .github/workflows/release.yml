@@ -1,0 +1,68 @@
+---
+name: Publish release
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write # This is required for steps.FromLabel
+
+concurrency:
+  group: pull-request-release
+
+jobs:
+  go-releaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: "false"
+      - name: Get next version
+        id: version
+        run: |
+          msg=$(git log -1 --format=%B | head -1)
+          if echo "${msg}" | grep --quiet '^fix[^[:space:]:]*:'; then
+            version_bump=patch
+          elif echo "${msg}" | grep --quiet '^feat[^[:space:]:]*:'; then
+            version_bump=minor
+          elif echo "${msg}" | grep --quiet '^BREAKING CHANGE[^[:space:]:]*:'; then
+            version_bump=major
+          else
+            exit 0
+          fi
+          recent_version=$(git tag --sort -version:refname | sed --silent --regexp-extended 's/.*(v[[:digit:].]+)$/\1/p;q')
+          next_version=$(curl --silent https://raw.githubusercontent.com/fsaintjacques/semver-tool/master/src/semver |
+            bash -s bump ${version_bump} ${recent_version:-v0.0.0})
+          echo "next=${next_version}" >>${GITHUB_OUTPUT}
+      - name: Push next version
+        if: steps.version.outputs.next != ''
+        run: |
+          git config user.email 'GitHub Build'
+          git config user.name 'github@ei.aero'
+          git tag --force --annotate 'v${{ steps.version.outputs.next }}' --message 'v${{ steps.version.outputs.next }}'
+          git push --force origin 'HEAD:refs/tags/v${{ steps.version.outputs.next }}'
+      - name: Setup Go
+        if: steps.version.outputs.next != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache-dependency-path: "go.sum"
+          check-latest: true
+          cache: true
+      - name: Run tests
+        if: steps.version.outputs.next != ''
+        run: go test -v ./...
+      - name: Run GoReleaser
+        if: steps.version.outputs.next != ''
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          # distribution: goreleaser - either 'goreleaser' (default) or 'goreleaser-pro'
+          # 'latest', 'nightly', or a semver
+          version: "~> v2"
+          args: release --clean
+        env:
+          # GitHub sets this automatically
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

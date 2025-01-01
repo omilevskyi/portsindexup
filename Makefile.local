@@ -3,7 +3,7 @@
 #GO_ENV=	GOOS=linux GOARCH=amd64
 GO_ENV+=	CGO_ENABLED=0
 
-GIT_SHORT_COMMIT_ID=	$$(${GIT_CMD} rev-parse --short HEAD)
+GIT_SHORT_COMMIT_ID!=	${GIT_CMD} rev-parse --short HEAD
 GIT_VERSION!=		${GIT_CMD} tag --contains ${GIT_SHORT_COMMIT_ID} --sort version:refname
 .if empty(GIT_VERSION)
 GIT_VERSION=		devel

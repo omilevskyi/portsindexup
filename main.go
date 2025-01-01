@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -18,24 +19,22 @@ import (
 
 const (
 	idxSep    = "|"
-	rootDir   = "/"
-	dirSep    = "/"
 	depSep    = " "
 	numFields = 13
 )
 
 var (
-	// DEBUG is the string equivalent of Dbg
-	DEBUG, version, gitCommit string // -ldflags -X main.DEBUG=[[:digit:]] -X main.version=v0.0.0 -X main.gitCommit=[[:xdigit:]]
-
-	// Dbg is debug level, 0 - no noise
-	Dbg int
+	version, gitCommit string // -ldflags -X main.version=v0.0.0 -X main.gitCommit=[[:xdigit:]] -X main.makeBin=/usr/bin/make
 
 	portsDir    string
 	indexFile   string
 	helpFlag    bool
 	verboseFlag bool
-	makeBin     string = "make"
+	versionFlag bool
+
+	rootDir string
+	dirSep  string = string([]byte{os.PathSeparator})
+	makeBin string
 )
 
 func readStdout(cmdPath string, args []string) (string, error) {
@@ -54,7 +53,7 @@ func readStdout(cmdPath string, args []string) (string, error) {
 
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		output.WriteString(scanner.Text()) // result is concatenated strings without \n !!
+		output.WriteString(scanner.Text()) // result is concatenated strings without \n
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -69,7 +68,7 @@ func readStdout(cmdPath string, args []string) (string, error) {
 }
 
 func sysCtlUint32(param string) (string, error) {
-	data, err := unix.SysctlRaw(param) // unix.Sysctl(param) does not work for osRelDate
+	data, err := unix.SysctlRaw(param) // unix.Sysctl(param) does not work for osreldate
 	if err != nil {
 		return "", fmt.Errorf("error reading sysctl: %w", err)
 	}
@@ -88,24 +87,24 @@ func strip(input string) string {
 	return input
 }
 
-func replace(s, search, replace string) string {
-	if pos := strings.Index(s, search); pos >= 0 {
-		return s[:pos] + replace + s[pos+len(search):]
+func replace(source, search, replace string) string {
+	if pos := strings.Index(source, search); pos >= 0 {
+		return source[:pos] + replace + source[pos+len(search):]
 	}
-	return s
+	return source
 }
 
 func checkDirAccess(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("directory does not exist")
+			return errors.New("directory does not exist")
 		}
 		return fmt.Errorf("error accessing directory: %w", err)
 	}
 
 	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory")
+		return errors.New("path is not a directory")
 	}
 
 	return nil
@@ -166,22 +165,86 @@ func processOrigin(origins map[string][]string, portsDir, origin string) []strin
 	return errList
 }
 
+func rootDirectory() (string, error) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		parentDir := filepath.Dir(currentDir)
+
+		if currentDir == parentDir {
+			return currentDir, nil
+		}
+
+		currentDir = parentDir
+	}
+}
+
+func updatePath(dst, src []string, idx int, prefix string, count int) {
+	if idx < len(src) && idx < len(dst) && src[idx] != "" {
+		splitted := strings.Split(src[idx], dirSep)
+		if n := len(splitted); n > count {
+			dst[idx] = filepath.Join(prefix, filepath.Join(splitted[n-count:]...))
+		}
+	}
+}
+
+func safeUpdate(dst []string, didx int, src []string, sidx int) {
+	if sidx < len(src) && didx < len(dst) && src[sidx] != "" {
+		dst[didx] = src[sidx]
+	}
+}
+
+func updateDependency(pstr *string, replacements map[string]string, from, to string) {
+	if pstr != nil && *pstr != "" {
+		var builder strings.Builder
+		builder.Grow(len(*pstr))
+		for i, f := range strings.Fields(*pstr) {
+			if v, ok := replacements[strip(f)]; ok {
+				f = v
+			}
+			if i > 0 {
+				builder.WriteString(depSep)
+			}
+			builder.WriteString(replace(f, from, to))
+		}
+		if proposed := builder.String(); proposed != *pstr {
+			*pstr = proposed
+		}
+	}
+}
+
 func main() {
 	flag.StringVar(&portsDir, "ports-dir", "", "Path to the ports directory")
 	flag.StringVar(&indexFile, "index-file", "", "Path to the index file")
 	flag.BoolVar(&helpFlag, "help", false, "Display help message")
 	flag.BoolVar(&verboseFlag, "verbose", false, "Enable verbose output")
+	flag.BoolVar(&versionFlag, "version", false, "Show version information")
 	flag.Parse()
 
 	if helpFlag {
 		fmt.Fprintln(os.Stderr, "Usage: portsindexup [-ports-dir ..] [-index-file] [-help] [-verbose] [port_origins] [< port_origins]")
-		os.Exit(201)
+		os.Exit(0)
+	}
+
+	if versionFlag {
+		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit)
+		os.Exit(0)
+	}
+
+	var err error
+	if rootDir, err = rootDirectory(); err != nil {
+		panic(err)
 	}
 
 	osRelDate, err := sysCtlUint32("kern.osreldate")
 	if err != nil {
 		panic(err)
 	}
+
+	badOsRelDate := osRelDate[:2] + strings.Repeat("9", len(osRelDate)-2)
 
 	portsDirDefault, err := readStdout(makeBin, []string{"-C", rootDir, "-V", "PORTSDIR"})
 	if err != nil {
@@ -191,8 +254,6 @@ func main() {
 	if portsDir == "" {
 		portsDir = portsDirDefault
 	}
-
-	badOsRelDate := osRelDate[:2] + strings.Repeat("9", len(osRelDate)-2)
 
 	if verboseFlag {
 		fmt.Fprintf(os.Stderr, "make:\t%s\n", makeBin)
@@ -245,11 +306,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "index_file:\t%s\n", indexFile)
-		fmt.Fprintf(os.Stderr, "temp_file:\t%s\n", tempFile.Name())
-	}
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempFile.Name())
+	}()
 
 	file, err := os.Open(indexFile)
 	if err != nil {
@@ -257,6 +317,12 @@ func main() {
 	}
 	defer file.Close()
 
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "index_file:\t%s\n", indexFile)
+		fmt.Fprintf(os.Stderr, "temp_file:\t%s\n", tempFile.Name())
+	}
+
+	// TODO: detect removal of the origin directory, delete lines from the INDEX file, and update dependency fields
 	// 0            1       2            3       4          5          6          7             8        9   10           11         12
 	// name-version|portdir|local_prefix|comment|descr_file|maintainer|categories|build_depends|run_deps|www|extract_deps|patch_deps|fetch_deps
 	lineCount, changedCount := 0, 0
@@ -276,77 +342,47 @@ func main() {
 		if origin, ok := strippedOrigins[strip(namever)]; ok {
 			namever = origin
 
-			if describedValue, ok := origins[namever]; ok {
-				if describedValue[0] != "" {
-					splitted := strings.Split(describedValue[0], dirSep)
-					if n := len(splitted); n > 2 {
-						fields[0] = filepath.Join(portsDirDefault, filepath.Join(splitted[n-2:]...))
-					}
-				}
+			if described, ok := origins[namever]; ok {
+				updatePath(fields, described, 0, portsDirDefault, 2) // portdir: /usr/ports/.dev/devel/readline -> /usr/ports/devel/readline
+				updatePath(fields, described, 3, portsDirDefault, 3) // description_file: /usr/ports/.dev/devel/readline/pkg-descr -> /usr/ports/devel/readline//pkg-descr
 
-				if describedValue[3] != "" {
-					splitted := strings.Split(describedValue[3], dirSep)
-					if n := len(splitted); n > 3 {
-						fields[3] = filepath.Join(portsDirDefault, filepath.Join(splitted[n-3:]...))
-					}
-				}
-
-				for _, i := range []int{1, 2, 4, 5} {
-					if describedValue[i] != "" {
-						fields[i] = describedValue[i]
-					}
-				}
-
-				fields[8] = describedValue[11]
+				safeUpdate(fields, 1, described, 1)  // local_prefix
+				safeUpdate(fields, 2, described, 2)  // comment
+				safeUpdate(fields, 4, described, 4)  // maintainer
+				safeUpdate(fields, 5, described, 5)  // categories
+				safeUpdate(fields, 8, described, 11) // www
 			}
 		}
 
-		//                      build_deps
-		//                      |  run_deps
-		//                      |  |  exract_deps
-		//                      |  |  |  patch_deps
-		//                      |  |  |  |   fetch_deps
-		//                      |  |  |  |   |
-		for _, i := range []int{6, 7, 9, 10, 11} {
-			deps := strings.Fields(fields[i])
-			for ii, dep := range deps {
-				if nv, ok := strippedOrigins[strip(dep)]; ok {
-					dep = nv
-				}
-				deps[ii] = replace(dep, badOsRelDate, osRelDate)
-			}
-			fields[i] = strings.Join(deps, depSep)
-		}
+		updateDependency(&fields[6], strippedOrigins, badOsRelDate, osRelDate)  // build_deps
+		updateDependency(&fields[7], strippedOrigins, badOsRelDate, osRelDate)  // run_deps
+		updateDependency(&fields[9], strippedOrigins, badOsRelDate, osRelDate)  // exract_deps
+		updateDependency(&fields[10], strippedOrigins, badOsRelDate, osRelDate) // patch_deps
+		updateDependency(&fields[11], strippedOrigins, badOsRelDate, osRelDate) // fetch_deps
 
-		namever = replace(namever, badOsRelDate, osRelDate)
-		result := namever + idxSep + strings.Join(fields, idxSep)
-
+		result := replace(namever, badOsRelDate, osRelDate) + idxSep + strings.Join(fields, idxSep)
 		if line != result {
 			changedCount++
 		}
 
-		fmt.Fprintf(tempFile, "%s\n", result)
+		fmt.Fprintln(tempFile, result)
 	}
 
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading index file: %v\n", err)
 	}
 
-	if err := tempFile.Close(); err != nil {
-		panic(err)
-	}
-
-	if err := file.Close(); err != nil {
-		panic(err)
-	}
-
 	if changedCount > 0 {
+		if err := file.Close(); err != nil {
+			panic(err)
+		}
+		if err := tempFile.Close(); err != nil {
+			panic(err)
+		}
 		if err := os.Rename(tempFile.Name(), indexFile); err != nil {
 			panic(err)
 		}
-	} else if err := os.Remove(tempFile.Name()); err != nil {
-		panic(err)
 	}
 
-	fmt.Fprintf(os.Stderr, "%d line(s) read, %d changed\n", lineCount, changedCount)
+	fmt.Fprintf(os.Stderr, "%d lines read, %d changed\n", lineCount, changedCount)
 }

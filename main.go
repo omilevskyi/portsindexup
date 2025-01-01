@@ -96,11 +96,7 @@ func checkDirAccess(path string) error {
 	return nil
 }
 
-<<<<<<< HEAD
 func processOrigin(origins map[string][]string, removed map[string]struct{}, portsDir, origin string) []error {
-=======
-func processOrigin(origins map[string][]string, portsDir, origin string) []error {
->>>>>>> 8f1f82b (Add small improvements)
 	var errList []error
 	var cmdPath string
 	if filepath.IsAbs(origin) {
@@ -110,7 +106,6 @@ func processOrigin(origins map[string][]string, portsDir, origin string) []error
 	}
 
 	if err := checkDirAccess(cmdPath); err != nil {
-<<<<<<< HEAD
 		if errors.Is(err, errNotExistingDir) {
 			splitted := strings.Split(cmdPath, pathSep)
 			if n := len(splitted); n > 1 {
@@ -118,8 +113,6 @@ func processOrigin(origins map[string][]string, portsDir, origin string) []error
 				return nil
 			}
 		}
-=======
->>>>>>> 8f1f82b (Add small improvements)
 		return []error{fmt.Errorf("%s: %v", cmdPath, err)}
 	}
 
@@ -263,11 +256,7 @@ func main() {
 
 	origins, removedOrigs := make(map[string][]string), make(map[string]struct{})
 	for _, origin := range flag.Args() {
-<<<<<<< HEAD
 		for _, err = range processOrigin(origins, removedOrigs, portsDir, origin) {
-=======
-		for _, err = range processOrigin(origins, portsDir, origin) {
->>>>>>> 8f1f82b (Add small improvements)
 			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
 		}
 	}
@@ -275,11 +264,7 @@ func main() {
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-<<<<<<< HEAD
 			for _, err = range processOrigin(origins, removedOrigs, portsDir, scanner.Text()) {
-=======
-			for _, err = range processOrigin(origins, portsDir, scanner.Text()) {
->>>>>>> 8f1f82b (Add small improvements)
 				fmt.Fprintln(os.Stderr, "processOrigin(stdin) error:", err)
 			}
 		}
@@ -389,11 +374,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error reading index file:", err)
 	}
 
-<<<<<<< HEAD
 	if changedCount+removedCount > 0 {
-=======
-	if changedCount > 0 {
->>>>>>> 8f1f82b (Add small improvements)
 		if err = file.Close(); err != nil {
 			panic(err)
 		}

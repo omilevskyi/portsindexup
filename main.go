@@ -94,9 +94,8 @@ func checkDirAccess(path string) error {
 	return nil
 }
 
-// TODO: переделать на []error
-func processOrigin(origins map[string][]string, portsDir, origin string) []string {
-	var errList []string
+func processOrigin(origins map[string][]string, portsDir, origin string) []error {
+	var errList []error
 	var cmdPath string
 	if filepath.IsAbs(origin) {
 		cmdPath = origin
@@ -105,18 +104,18 @@ func processOrigin(origins map[string][]string, portsDir, origin string) []strin
 	}
 
 	if err := checkDirAccess(cmdPath); err != nil {
-		return []string{fmt.Sprintf("%s: %v", cmdPath, err)}
+		return []error{fmt.Errorf("%s: %v", cmdPath, err)}
 	}
 
 	cmd := exec.Command(makeBin, "-C", cmdPath, "describe")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return []string{fmt.Sprintf("error creating stdout pipe for %s: %v", origin, err)}
+		return []error{fmt.Errorf("error creating stdout pipe for %s: %v", origin, err)}
 	}
 
 	if err := cmd.Start(); err != nil {
-		return []string{fmt.Sprintf("error starting command for %s: %v", origin, err)}
+		return []error{fmt.Errorf("error starting command for %s: %v", origin, err)}
 	}
 
 	// $(make describe) output's line record format is slightly different from INDEX
@@ -128,22 +127,22 @@ func processOrigin(origins map[string][]string, portsDir, origin string) []strin
 		lineCount++
 		fields := strings.Split(scanner.Text(), idxSep)
 		if n := len(fields); n < numFields {
-			errList = append(errList, fmt.Sprintf("line %d: invalid number of fields: %d", lineCount, n))
+			errList = append(errList, fmt.Errorf("line %d: invalid number of fields: %d", lineCount, n))
 			continue
 		}
 		origins[fields[0]] = fields[1:numFields]
 	}
 
 	if err := scanner.Err(); err != nil {
-		errList = append(errList, fmt.Sprintf("error reading output for %s: %v", origin, err))
+		errList = append(errList, fmt.Errorf("error reading output for %s: %v", origin, err))
 	}
 
 	if err := stdout.Close(); err != nil {
-		errList = append(errList, fmt.Sprintf("error closing stdout pipe for %s: %v", origin, err))
+		errList = append(errList, fmt.Errorf("error closing stdout pipe for %s: %v", origin, err))
 	}
 
 	if err := cmd.Wait(); err != nil {
-		errList = append(errList, fmt.Sprintf("wait for %s failed: %v", origin, err))
+		errList = append(errList, fmt.Errorf("wait for %s failed: %v", origin, err))
 	}
 
 	return errList
@@ -248,20 +247,20 @@ func main() {
 
 	origins := make(map[string][]string)
 	for _, origin := range flag.Args() {
-		for _, e := range processOrigin(origins, portsDir, origin) {
-			fmt.Fprintf(os.Stderr, "processOrigin(args) error: %s\n", e)
+		for _, err = range processOrigin(origins, portsDir, origin) {
+			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
 		}
 	}
 
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			for _, e := range processOrigin(origins, portsDir, scanner.Text()) {
-				fmt.Fprintf(os.Stderr, "processOrigin(stdin) error: %s\n", e)
+			for _, err = range processOrigin(origins, portsDir, scanner.Text()) {
+				fmt.Fprintln(os.Stderr, "processOrigin(stdin) error:", err)
 			}
 		}
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "error reading standard input: %v\n", err)
+		if err = scanner.Err(); err != nil {
+			fmt.Fprintln(os.Stderr, "error reading standard input:", err)
 		}
 	}
 
@@ -352,18 +351,18 @@ func main() {
 		fmt.Fprintln(tempFile, result)
 	}
 
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading index file: %v\n", err)
+	if err = scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error reading index file:", err)
 	}
 
 	if changedCount > 0 {
-		if err := file.Close(); err != nil {
+		if err = file.Close(); err != nil {
 			panic(err)
 		}
-		if err := tempFile.Close(); err != nil {
+		if err = tempFile.Close(); err != nil {
 			panic(err)
 		}
-		if err := os.Rename(tempFile.Name(), indexFile); err != nil {
+		if err = os.Rename(tempFile.Name(), indexFile); err != nil {
 			panic(err)
 		}
 	}

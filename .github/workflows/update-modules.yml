@@ -33,9 +33,7 @@ jobs:
               -tags 'static_build' \
               -o bootstrap
       - name: Run tests
-        run: |
-          env GOOS=freebsd GOARCH=amd64 CGO_ENABLED=0 \
-            go test -v ./...
+        run: go test -v ./...
       - name: Setup git config
         run: |
           git config user.email 'github@github.com'

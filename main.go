@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	idxSep    = "|"
-	depSep    = " "
-	numFields = 13
+	idxSep       = "|"
+	depSep       = " "
+	numFields    = 13
+	makeFileName = "Makefile"
 )
 
 var (
@@ -32,8 +33,8 @@ var (
 	rootDir string
 	makeBin string
 
-	pathSep           = string([]byte{os.PathSeparator})
-	errNotExistingDir = errors.New("directory does not exist")
+	pathSep        = string([]byte{os.PathSeparator})
+	errNotExisting = errors.New("entry does not exist")
 )
 
 func readStdout(cmdPath string, args []string) (string, error) {
@@ -80,43 +81,59 @@ func replace(source, search, replace string) string {
 	return source
 }
 
-func checkDirAccess(path string) error {
+func checkDir(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errNotExistingDir
+			return errNotExisting
 		}
-		return fmt.Errorf("error accessing directory: %w", err)
+		return fmt.Errorf("error accessing: %w", err)
 	}
-
 	if !info.IsDir() {
 		return errors.New("path is not a directory")
 	}
+	return nil
+}
 
+func checkFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errNotExisting
+		}
+		return fmt.Errorf("error accessing: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("path is not a file")
+	}
 	return nil
 }
 
 func processOrigin(origins map[string][]string, removed map[string]struct{}, portsDir, origin string) []error {
 	var errList []error
-	var cmdPath string
+	var cmdDir string
 	if filepath.IsAbs(origin) {
-		cmdPath = origin
+		cmdDir = origin
 	} else {
-		cmdPath = filepath.Join(portsDir, origin)
+		cmdDir = filepath.Join(portsDir, origin)
 	}
 
-	if err := checkDirAccess(cmdPath); err != nil {
-		if errors.Is(err, errNotExistingDir) {
-			splitted := strings.Split(cmdPath, pathSep)
+	if err := checkDir(cmdDir); err != nil {
+		if errors.Is(err, errNotExisting) {
+			splitted := strings.Split(cmdDir, pathSep)
 			if n := len(splitted); n > 1 {
 				removed[filepath.Join(splitted[n-2:]...)] = struct{}{}
 				return nil
 			}
 		}
-		return []error{fmt.Errorf("%s: %v", cmdPath, err)}
+		return []error{fmt.Errorf("%s: %v", cmdDir, err)}
 	}
 
-	cmd := exec.Command(makeBin, "-C", cmdPath, "describe")
+	if checkFile(filepath.Join(cmdDir, makeFileName)) != nil {
+		return nil
+	}
+
+	cmd := exec.Command(makeBin, "-C", cmdDir, "describe")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -4,6 +4,10 @@
 GO_ENV+=	CGO_ENABLED=0
 
 GIT_SHORT_COMMIT_ID=	$$(${GIT_CMD} rev-parse --short HEAD)
+GIT_VERSION!=		${GIT_CMD} tag --contains ${GIT_SHORT_COMMIT_ID} --sort version:refname
+.if empty(GIT_VERSION)
+GIT_VERSION=		devel
+.endif
 
 .if empty(IS_LAMBDA)
 GO_BUILDFLAGS+= -tags 'static_build'
@@ -12,7 +16,7 @@ GO_BUILDFLAGS+= -tags 'lambda.norpc,static_build'
 .endif
 
 GO_LDFLAGS=	-s -w -extldflags -static \
-	-X main.version=$$(${GIT_CMD} tag --contains ${GIT_SHORT_COMMIT_ID} --sort version:refname) \
+	-X main.version=${GIT_VERSION} \
 	-X main.gitCommit=${GIT_SHORT_COMMIT_ID} \
 	-X main.makeBin=$$(which make) \
 	-X main.DEBUG=0

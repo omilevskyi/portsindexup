@@ -30,8 +30,10 @@ var (
 	versionFlag bool
 
 	rootDir string
-	dirSep  string = string([]byte{os.PathSeparator})
 	makeBin string
+
+	pathSep           = string([]byte{os.PathSeparator})
+	errNotExistingDir = errors.New("directory does not exist")
 )
 
 func readStdout(cmdPath string, args []string) (string, error) {
@@ -82,7 +84,7 @@ func checkDirAccess(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errors.New("directory does not exist")
+			return errNotExistingDir
 		}
 		return fmt.Errorf("error accessing directory: %w", err)
 	}
@@ -94,7 +96,7 @@ func checkDirAccess(path string) error {
 	return nil
 }
 
-func processOrigin(origins map[string][]string, portsDir, origin string) []error {
+func processOrigin(origins map[string][]string, removed map[string]struct{}, portsDir, origin string) []error {
 	var errList []error
 	var cmdPath string
 	if filepath.IsAbs(origin) {
@@ -104,6 +106,13 @@ func processOrigin(origins map[string][]string, portsDir, origin string) []error
 	}
 
 	if err := checkDirAccess(cmdPath); err != nil {
+		if errors.Is(err, errNotExistingDir) {
+			splitted := strings.Split(cmdPath, pathSep)
+			if n := len(splitted); n > 1 {
+				removed[filepath.Join(splitted[n-2:]...)] = struct{}{}
+				return nil
+			}
+		}
 		return []error{fmt.Errorf("%s: %v", cmdPath, err)}
 	}
 
@@ -167,8 +176,8 @@ func rootDirectory() (string, error) {
 
 func updatePath(dst, src []string, idx int, prefix string, count int) {
 	if idx < len(src) && idx < len(dst) && src[idx] != "" {
-		splitted := strings.Split(src[idx], dirSep)
-		if n := len(splitted); n > count {
+		splitted := strings.Split(src[idx], pathSep)
+		if n := len(splitted); n >= count {
 			dst[idx] = filepath.Join(prefix, filepath.Join(splitted[n-count:]...))
 		}
 	}
@@ -245,9 +254,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "portsDir:\t%s\n", portsDir)
 	}
 
-	origins := make(map[string][]string)
+	origins, removedOrigs := make(map[string][]string), make(map[string]struct{})
 	for _, origin := range flag.Args() {
-		for _, err = range processOrigin(origins, portsDir, origin) {
+		for _, err = range processOrigin(origins, removedOrigs, portsDir, origin) {
 			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
 		}
 	}
@@ -255,7 +264,7 @@ func main() {
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			for _, err = range processOrigin(origins, portsDir, scanner.Text()) {
+			for _, err = range processOrigin(origins, removedOrigs, portsDir, scanner.Text()) {
 				fmt.Fprintln(os.Stderr, "processOrigin(stdin) error:", err)
 			}
 		}
@@ -308,7 +317,7 @@ func main() {
 	// TODO: detect removal of the origin directory, delete lines from the INDEX file, and update dependency fields
 	// 0            1       2            3       4          5          6          7             8        9   10           11         12
 	// name-version|portdir|local_prefix|comment|descr_file|maintainer|categories|build_depends|run_deps|www|extract_deps|patch_deps|fetch_deps
-	lineCount, changedCount := 0, 0
+	lineCount, changedCount, removedCount := 0, 0, 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		lineCount++
@@ -321,6 +330,16 @@ func main() {
 		}
 
 		namever := fields[0]
+		splitted := strings.Split(fields[1], pathSep)
+		if n := len(splitted); n > 1 {
+			origin := filepath.Join(splitted[n-2:]...)
+			if _, ok := removedOrigs[origin]; ok {
+				fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
+				removedCount++
+				continue
+			}
+		}
+
 		fields = fields[1:numFields]
 		if origin, ok := strippedOrigins[strip(namever)]; ok {
 			namever = origin
@@ -355,7 +374,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error reading index file:", err)
 	}
 
-	if changedCount > 0 {
+	if changedCount+removedCount > 0 {
 		if err = file.Close(); err != nil {
 			panic(err)
 		}
@@ -367,5 +386,5 @@ func main() {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%d lines read, %d changed\n", lineCount, changedCount)
+	fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed\n", lineCount, changedCount, removedCount)
 }

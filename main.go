@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,8 +12,6 @@ import (
 	"strings"
 
 	"github.com/mattn/go-isatty"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -65,19 +62,6 @@ func readStdout(cmdPath string, args []string) (string, error) {
 	}
 
 	return output.String(), nil
-}
-
-func sysCtlUint32(param string) (string, error) {
-	data, err := unix.SysctlRaw(param) // unix.Sysctl(param) does not work for osreldate
-	if err != nil {
-		return "", fmt.Errorf("error reading sysctl: %w", err)
-	}
-
-	if len(data) < 4 {
-		return "", fmt.Errorf("unexpected data length: %d", len(data))
-	}
-
-	return fmt.Sprint(binary.LittleEndian.Uint32(data)), nil // FreeBSD amd64 has Little Endian
 }
 
 func strip(input string) string {

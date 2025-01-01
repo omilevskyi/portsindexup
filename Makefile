@@ -58,6 +58,12 @@ fmt: .PHONY	## Format sources
 	${GOIMPORTS} -w .
 	${GOFMT} -w -s .
 
+list-modules: .PHONY
+	${GO_CMD} list -u -m all
+
+versions: .PHONY ${PROJECT_BIN}
+	${GO_CMD} version -m ${.ALLSRC}
+
 test: .PHONY
 #	${GO_CMD} test -v -race -covermode=atomic ./...
 	${GO_CMD} test -v ./...

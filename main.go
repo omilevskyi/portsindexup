@@ -405,6 +405,6 @@ func main() {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d writtent\n",
+	fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written\n",
 		lineCount, changedCount, removedCount, writtenCount)
 }

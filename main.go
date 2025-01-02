@@ -179,14 +179,11 @@ func rootDirectory() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	for {
 		parentDir := filepath.Dir(currentDir)
-
 		if currentDir == parentDir {
 			return currentDir, nil
 		}
-
 		currentDir = parentDir
 	}
 }
@@ -334,7 +331,7 @@ func main() {
 	// TODO: detect removal of the origin directory, delete lines from the INDEX file, and update dependency fields
 	// 0            1       2            3       4          5          6          7             8        9   10           11         12
 	// name-version|portdir|local_prefix|comment|descr_file|maintainer|categories|build_depends|run_deps|www|extract_deps|patch_deps|fetch_deps
-	lineCount, changedCount, removedCount := 0, 0, 0
+	lineCount, changedCount, removedCount, writtenCount := 0, 0, 0, 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		lineCount++
@@ -351,7 +348,9 @@ func main() {
 		if n := len(splitted); n > 1 {
 			origin := filepath.Join(splitted[n-2:]...)
 			if _, ok := removedOrigs[origin]; ok {
-				fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
+				if verboseFlag {
+					fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
+				}
 				removedCount++
 				continue
 			}
@@ -384,7 +383,10 @@ func main() {
 			changedCount++
 		}
 
-		fmt.Fprintln(tempFile, result)
+		if _, err = fmt.Fprintln(tempFile, result); err != nil {
+			panic(err)
+		}
+		writtenCount++
 	}
 
 	if err = scanner.Err(); err != nil {
@@ -403,5 +405,6 @@ func main() {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed\n", lineCount, changedCount, removedCount)
+	fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d writtent\n",
+		lineCount, changedCount, removedCount, writtenCount)
 }

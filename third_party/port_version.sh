@@ -26,7 +26,7 @@ if [ -z "${COMMIT_ID}" ]; then
 	COMMIT_ID=$(${GIT_CMD} rev-parse --short HEAD)
 	test -z "${DEBUG}" || echo "COMMIT_ID=${COMMIT_ID}"
 	${GIT_CMD} reset --hard --no-recurse-submodule
-	${GIT_CMD} pull --all --prune --stat --verbose
+	${GIT_CMD} pull --all --prune --stat ${DEBUG:+--verbose}
 fi
 
 exec ${GIT_CMD} diff --no-color --name-only "${COMMIT_ID}" |

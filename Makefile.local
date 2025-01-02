@@ -25,5 +25,5 @@ SRCS+=		main.go
 
 RUN_PARAMETERS?=-ports-dir=/usr/ports-dev -verbose devel/readline
 
-install: .PHONY ${PROJECT_BIN}
-	install ${PROJECT_BIN} ${HOME}/bin
+install: .PHONY ${PROJECT_BIN} third_party/port_version.sh
+	install ${.ALLSRC} ${HOME}/bin

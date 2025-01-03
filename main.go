@@ -405,6 +405,11 @@ func main() {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written\n",
-		lineCount, changedCount, removedCount, writtenCount)
+	if lineCount == writtenCount {
+		fmt.Fprintf(os.Stderr, "%d lines read/written, %d changed, %d removed\n",
+			lineCount, changedCount, removedCount)
+	} else {
+		fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written\n",
+			lineCount, changedCount, removedCount, writtenCount)
+	}
 }

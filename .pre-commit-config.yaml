@@ -15,11 +15,11 @@ repos:
       - id: sort-simple-yaml
       - id: check-added-large-files
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.17.0
+    rev: v0.17.1
     hooks:
       - id: markdownlint-cli2
   - repo: https://github.com/zricethezav/gitleaks
-    rev: v8.22.0
+    rev: v8.22.1
     hooks:
       - id: gitleaks
   - repo: https://github.com/python-jsonschema/check-jsonschema

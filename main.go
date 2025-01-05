@@ -31,8 +31,8 @@ var (
 	versionFlag bool
 
 	rootDir string
-	makeBin string
 
+	makeBin        = "make"
 	pathSep        = string([]byte{os.PathSeparator})
 	errNotExisting = errors.New("entry does not exist")
 )
@@ -109,7 +109,7 @@ func checkFile(path string) error {
 	return nil
 }
 
-func processOrigin(origins map[string][]string, removed map[string]struct{}, portsDir, origin string) []error {
+func processOrigin(origins, removed *MapSlice, portsDir, origin string) []error {
 	var errList []error
 	var cmdDir string
 	if filepath.IsAbs(origin) {
@@ -122,7 +122,7 @@ func processOrigin(origins map[string][]string, removed map[string]struct{}, por
 		if errors.Is(err, errNotExisting) {
 			splitted := strings.Split(cmdDir, pathSep)
 			if n := len(splitted); n > 1 {
-				removed[filepath.Join(splitted[n-2:]...)] = struct{}{}
+				removed.Set(filepath.Join(splitted[n-2:]...), nil)
 				return nil
 			}
 		}
@@ -156,7 +156,7 @@ func processOrigin(origins map[string][]string, removed map[string]struct{}, por
 			errList = append(errList, fmt.Errorf("line %d: invalid number of fields: %d", lineCount, n))
 			continue
 		}
-		origins[fields[0]] = fields[1:numFields]
+		origins.Set(fields[0], fields[1:numFields])
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -268,7 +268,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "portsDir:\t%s\n", portsDir)
 	}
 
-	origins, removedOrigs := make(map[string][]string), make(map[string]struct{})
+	origins, removedOrigs := MapSliceNew(), MapSliceNew() //	make(map[string][]string), make(map[string]struct{})
 	for _, origin := range flag.Args() {
 		for _, err = range processOrigin(origins, removedOrigs, portsDir, origin) {
 			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
@@ -287,16 +287,17 @@ func main() {
 		}
 	}
 
+	originLen := origins.Len()
 	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "%d origin(s) stored\n", len(origins))
+		fmt.Fprintf(os.Stderr, "%d origin(s) stored\n", originLen)
 	}
 
-	if len(origins) < 1 {
+	if originLen < 1 {
 		return
 	}
 
-	strippedOrigins := make(map[string]string, len(origins))
-	for k := range origins {
+	strippedOrigins := make(map[string]string, originLen)
+	for k := range origins.Map {
 		strippedOrigins[strip(k)] = k
 	}
 
@@ -347,7 +348,7 @@ func main() {
 		splitted := strings.Split(fields[1], pathSep)
 		if n := len(splitted); n > 1 {
 			origin := filepath.Join(splitted[n-2:]...)
-			if _, ok := removedOrigs[origin]; ok {
+			if _, ok := removedOrigs.Map[origin]; ok {
 				if verboseFlag {
 					fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
 				}
@@ -360,7 +361,7 @@ func main() {
 		if origin, ok := strippedOrigins[strip(namever)]; ok {
 			namever = origin
 
-			if described, ok := origins[namever]; ok {
+			if described, ok := origins.Map[namever]; ok {
 				updatePath(fields, described, 0, portsDirDefault, 2) // portdir: /usr/ports/.dev/devel/readline -> /usr/ports/devel/readline
 				updatePath(fields, described, 3, portsDirDefault, 3) // description_file: /usr/ports/.dev/devel/readline/pkg-descr -> /usr/ports/devel/readline//pkg-descr
 

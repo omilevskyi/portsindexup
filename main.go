@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 )
@@ -109,8 +111,7 @@ func checkFile(path string) error {
 	return nil
 }
 
-func processOrigin(origins, removed *MapSlice, portsDir, origin string) []error {
-	var errList []error
+func processOrigin(wp *WorkerPool, removed map[string]struct{}, portsDir, origin, source string) error {
 	var cmdDir string
 	if filepath.IsAbs(origin) {
 		cmdDir = origin
@@ -122,56 +123,23 @@ func processOrigin(origins, removed *MapSlice, portsDir, origin string) []error 
 		if errors.Is(err, errNotExisting) {
 			splitted := strings.Split(cmdDir, pathSep)
 			if n := len(splitted); n > 1 {
-				removed.Set(filepath.Join(splitted[n-2:]...), nil)
+				removed[filepath.Join(splitted[n-2:]...)] = struct{}{}
 				return nil
 			}
 		}
-		return []error{fmt.Errorf("%s: %v", cmdDir, err)}
+		return fmt.Errorf("%s: %v", cmdDir, err)
 	}
 
-	if checkFile(filepath.Join(cmdDir, makeFileName)) != nil {
-		return nil
+	if checkFile(filepath.Join(cmdDir, makeFileName)) == nil {
+		wp.AddTask(Task{
+			Origin: origin,
+			Source: source,
+			Cmd:    makeBin,
+			Args:   []string{"-C", cmdDir, "describe"},
+		})
 	}
 
-	cmd := exec.Command(makeBin, "-C", cmdDir, "describe")
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return []error{fmt.Errorf("error creating stdout pipe for %s: %v", origin, err)}
-	}
-
-	if err := cmd.Start(); err != nil {
-		return []error{fmt.Errorf("error starting command for %s: %v", origin, err)}
-	}
-
-	// $(make describe) output's line record format is slightly different from INDEX
-	// 0            1       2            3       4          5          6          7            8          9          10            11       12
-	// name-version|portdir|local_prefix|comment|descr_file|maintainer|categories|extract_deps|patch_deps|fetch_deps|build_depends|run_deps|www
-	lineCount := 0
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		lineCount++
-		fields := strings.Split(scanner.Text(), idxSep)
-		if n := len(fields); n < numFields {
-			errList = append(errList, fmt.Errorf("line %d: invalid number of fields: %d", lineCount, n))
-			continue
-		}
-		origins.Set(fields[0], fields[1:numFields])
-	}
-
-	if err := scanner.Err(); err != nil {
-		errList = append(errList, fmt.Errorf("error reading output for %s: %v", origin, err))
-	}
-
-	if err := stdout.Close(); err != nil {
-		errList = append(errList, fmt.Errorf("error closing stdout pipe for %s: %v", origin, err))
-	}
-
-	if err := cmd.Wait(); err != nil {
-		errList = append(errList, fmt.Errorf("wait for %s failed: %v", origin, err))
-	}
-
-	return errList
+	return nil
 }
 
 func rootDirectory() (string, error) {
@@ -223,6 +191,8 @@ func updateDependency(pstr *string, replacements map[string]string, from, to str
 }
 
 func main() {
+	start := time.Now()
+
 	flag.StringVar(&portsDir, "ports-dir", "", "Path to the ports directory")
 	flag.StringVar(&indexFile, "index-file", "", "Path to the index file")
 	flag.BoolVar(&helpFlag, "help", false, "Display help message")
@@ -235,8 +205,10 @@ func main() {
 		os.Exit(0)
 	}
 
+	nCPU := runtime.NumCPU()
+
 	if versionFlag {
-		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit)
+		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit+", nCPUs:", nCPU)
 		os.Exit(0)
 	}
 
@@ -268,9 +240,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "portsDir:\t%s\n", portsDir)
 	}
 
-	origins, removedOrigs := MapSliceNew(), MapSliceNew() //	make(map[string][]string), make(map[string]struct{})
+	origins, workerErrors, removedOrigs := make(map[string][]string), make([]error, 0), make(map[string]struct{})
+	pool := NewWorkerPool(nCPU)
+	pool.Start(origins, &workerErrors)
+
 	for _, origin := range flag.Args() {
-		for _, err = range processOrigin(origins, removedOrigs, portsDir, origin) {
+		if err = processOrigin(pool, removedOrigs, portsDir, origin, "argv"); err != nil {
 			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
 		}
 	}
@@ -278,7 +253,7 @@ func main() {
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			for _, err = range processOrigin(origins, removedOrigs, portsDir, scanner.Text()) {
+			if err = processOrigin(pool, removedOrigs, portsDir, scanner.Text(), "stdin"); err != nil {
 				fmt.Fprintln(os.Stderr, "processOrigin(stdin) error:", err)
 			}
 		}
@@ -287,7 +262,13 @@ func main() {
 		}
 	}
 
-	originLen := origins.Len()
+	pool.Stop()
+
+	for _, err := range workerErrors {
+		fmt.Fprintln(os.Stderr, err)
+	}
+
+	originLen := len(origins)
 	if verboseFlag {
 		fmt.Fprintf(os.Stderr, "%d origin(s) stored\n", originLen)
 	}
@@ -297,7 +278,7 @@ func main() {
 	}
 
 	strippedOrigins := make(map[string]string, originLen)
-	for k := range origins.Map {
+	for k := range origins {
 		strippedOrigins[strip(k)] = k
 	}
 
@@ -348,7 +329,7 @@ func main() {
 		splitted := strings.Split(fields[1], pathSep)
 		if n := len(splitted); n > 1 {
 			origin := filepath.Join(splitted[n-2:]...)
-			if _, ok := removedOrigs.Map[origin]; ok {
+			if _, ok := removedOrigs[origin]; ok {
 				if verboseFlag {
 					fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
 				}
@@ -361,7 +342,7 @@ func main() {
 		if origin, ok := strippedOrigins[strip(namever)]; ok {
 			namever = origin
 
-			if described, ok := origins.Map[namever]; ok {
+			if described, ok := origins[namever]; ok {
 				updatePath(fields, described, 0, portsDirDefault, 2) // portdir: /usr/ports/.dev/devel/readline -> /usr/ports/devel/readline
 				updatePath(fields, described, 3, portsDirDefault, 3) // description_file: /usr/ports/.dev/devel/readline/pkg-descr -> /usr/ports/devel/readline//pkg-descr
 
@@ -406,11 +387,12 @@ func main() {
 		}
 	}
 
+	duration := time.Since(start).Seconds()
 	if lineCount == writtenCount {
-		fmt.Fprintf(os.Stderr, "%d lines read/written, %d changed, %d removed\n",
-			lineCount, changedCount, removedCount)
+		fmt.Fprintf(os.Stderr, "%d lines read/written, %d changed, %d removed during %.3f seconds\n",
+			lineCount, changedCount, removedCount, duration)
 	} else {
-		fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written\n",
-			lineCount, changedCount, removedCount, writtenCount)
+		fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written during %.3f seconds\n",
+			lineCount, changedCount, removedCount, writtenCount, duration)
 	}
 }

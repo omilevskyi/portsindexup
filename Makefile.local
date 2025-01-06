@@ -27,6 +27,7 @@ RUN_PARAMETERS?=-ports-dir=/usr/ports-dev -verbose devel/readline
 
 install: .PHONY ${PROJECT_BIN} third_party/port_version.sh
 	install ${.ALLSRC} ${HOME}/bin
+	ls -l ${.ALLSRC:T:S,^,${HOME}/bin/,}
 
 test-run: prepare-run run compare-run .PHONY
 

@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 )
 
-// Task -
-type Task struct {
+// RunTask -
+type RunTask struct {
 	Origin, Source string
 	Cmd            string
 	Args           []string
@@ -18,7 +19,7 @@ type Task struct {
 
 // WorkerPool -
 type WorkerPool struct {
-	tasks    chan Task
+	tasks    chan RunTask
 	wg       sync.WaitGroup
 	muOut    sync.Mutex
 	muErr    sync.Mutex
@@ -28,7 +29,7 @@ type WorkerPool struct {
 // NewWorkerPool -
 func NewWorkerPool(maxCount int) *WorkerPool {
 	return &WorkerPool{
-		tasks:    make(chan Task),
+		tasks:    make(chan RunTask),
 		maxCount: maxCount,
 	}
 }
@@ -48,7 +49,7 @@ func (wp *WorkerPool) Stop() {
 }
 
 // AddTask -
-func (wp *WorkerPool) AddTask(task Task) {
+func (wp *WorkerPool) AddTask(task RunTask) {
 	wp.tasks <- task
 }
 
@@ -68,7 +69,7 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errSlice *[]
 				*errSlice = append(*errSlice, fmt.Errorf("error creating stdout pipe for %s (%s): %w", task.Origin, task.Source, err))
 				wp.muErr.Unlock()
 			}
-			return
+			continue
 		}
 
 		if err := cmd.Start(); err != nil {
@@ -77,7 +78,7 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errSlice *[]
 				*errSlice = append(*errSlice, fmt.Errorf("error starting command for %s (%s): %w", task.Origin, task.Source, err))
 				wp.muErr.Unlock()
 			}
-			return
+			continue
 		}
 
 		// $(make describe) output's line record format is slightly different from INDEX
@@ -122,5 +123,6 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errSlice *[]
 				wp.muErr.Unlock()
 			}
 		}
+		runtime.Gosched()
 	}
 }

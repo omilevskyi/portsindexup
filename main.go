@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -22,6 +23,19 @@ const (
 	numFields    = 13
 	makeFileName = "Makefile"
 )
+
+// Task -
+type Task struct {
+	Index int
+	Line  string
+}
+
+// Result -
+type Result struct {
+	Index  int
+	Source string
+	Value  string
+}
 
 var (
 	version, gitCommit string // -ldflags -X main.version=v0.0.0 -X main.gitCommit=[[:xdigit:]] -X main.makeBin=/usr/bin/make
@@ -127,11 +141,11 @@ func processOrigin(wp *WorkerPool, removed map[string]struct{}, portsDir, origin
 				return nil
 			}
 		}
-		return fmt.Errorf("%s: %v", cmdDir, err)
+		return fmt.Errorf("%s: %w", cmdDir, err)
 	}
 
 	if checkFile(filepath.Join(cmdDir, makeFileName)) == nil {
-		wp.AddTask(Task{
+		wp.AddTask(RunTask{
 			Origin: origin,
 			Source: source,
 			Cmd:    makeBin,
@@ -242,7 +256,7 @@ func main() {
 
 	origins, workerErrors, removedOrigs := make(map[string][]string), make([]error, 0), make(map[string]struct{})
 	pool := NewWorkerPool(nCPU)
-	pool.Start(origins, &workerErrors)
+	pool.Start(origins, &workerErrors) // write errors into a channel rather than into a slice
 
 	for _, origin := range flag.Args() {
 		if err = processOrigin(pool, removedOrigs, portsDir, origin, "argv"); err != nil {
@@ -299,6 +313,9 @@ func main() {
 		os.Remove(tempFile.Name())
 	}()
 
+	tempWriter := bufio.NewWriter(tempFile)
+	defer tempWriter.Flush()
+
 	file, err := os.Open(indexFile)
 	if err != nil {
 		panic(err)
@@ -310,73 +327,129 @@ func main() {
 		fmt.Fprintf(os.Stderr, "temp_file:\t%s\n", tempFile.Name())
 	}
 
+	tasks, results := make(chan Task, nCPU), make(chan Result, nCPU)
+	var readWg, writeWg sync.WaitGroup
+	lineCount, changedCount, removedCount, writtenCount := 0, 0, 0, 0
+
+	readWg.Add(nCPU)
+	for i := 0; i < nCPU; i++ {
+		go func() {
+			defer readWg.Done()
+			for task := range tasks {
+				fields := strings.Split(task.Line, idxSep)
+
+				if n := len(fields); n < numFields {
+					fmt.Fprintf(os.Stderr, "Line %d: invalid number of fields: %d\n", lineCount, n)
+					results <- Result{Index: task.Index}
+					continue
+				}
+
+				namever := fields[0]
+				splitted := strings.Split(fields[1], pathSep)
+				if n := len(splitted); n > 1 {
+					origin := filepath.Join(splitted[n-2:]...)
+					if _, ok := removedOrigs[origin]; ok {
+						if verboseFlag {
+							fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
+						}
+						removedCount++
+						results <- Result{Index: task.Index}
+						continue
+					}
+				}
+
+				fields = fields[1:numFields]
+				if origin, ok := strippedOrigins[strip(namever)]; ok {
+					namever = origin
+
+					if described, ok := origins[namever]; ok {
+						updatePath(fields, described, 0, portsDirDefault, 2) // portdir: /usr/ports/.dev/devel/readline -> /usr/ports/devel/readline
+						updatePath(fields, described, 3, portsDirDefault, 3) // description_file: /usr/ports/.dev/devel/readline/pkg-descr -> /usr/ports/devel/readline//pkg-descr
+
+						safeUpdate(fields, 1, described, 1)  // local_prefix
+						safeUpdate(fields, 2, described, 2)  // comment
+						safeUpdate(fields, 4, described, 4)  // maintainer
+						safeUpdate(fields, 5, described, 5)  // categories
+						safeUpdate(fields, 8, described, 11) // www
+					}
+				}
+
+				updateDependency(&fields[6], strippedOrigins, badOsRelDate, osRelDate)  // build_deps
+				updateDependency(&fields[7], strippedOrigins, badOsRelDate, osRelDate)  // run_deps
+				updateDependency(&fields[9], strippedOrigins, badOsRelDate, osRelDate)  // exract_deps
+				updateDependency(&fields[10], strippedOrigins, badOsRelDate, osRelDate) // patch_deps
+				updateDependency(&fields[11], strippedOrigins, badOsRelDate, osRelDate) // fetch_deps
+
+				results <- Result{
+					Index:  task.Index,
+					Source: task.Line,
+					Value:  replace(namever, badOsRelDate, osRelDate) + idxSep + strings.Join(fields, idxSep),
+				}
+
+				runtime.Gosched()
+			}
+		}()
+	}
+
+	writeWg.Add(1)
+	go func() {
+		defer writeWg.Done()
+
+		resultMap, expectedIndex := make(map[int]string), 1
+		for result := range results {
+			if result.Index != expectedIndex {
+				resultMap[result.Index] = result.Value
+				continue
+			}
+
+			for {
+				if result.Value != "" {
+					if result.Source != result.Value {
+						changedCount++
+					}
+					if _, err = fmt.Fprintln(tempWriter, result.Value); err != nil {
+						panic(err)
+					}
+					writtenCount++
+				}
+				expectedIndex++
+
+				if nextResult, ok := resultMap[expectedIndex]; ok {
+					result.Value = nextResult
+					delete(resultMap, expectedIndex)
+				} else {
+					break
+				}
+			}
+			runtime.Gosched()
+		}
+	}()
+
 	// TODO: detect removal of the origin directory, delete lines from the INDEX file, and update dependency fields
 	// 0            1       2            3       4          5          6          7             8        9   10           11         12
 	// name-version|portdir|local_prefix|comment|descr_file|maintainer|categories|build_depends|run_deps|www|extract_deps|patch_deps|fetch_deps
-	lineCount, changedCount, removedCount, writtenCount := 0, 0, 0, 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lineCount++
-		line := scanner.Text()
-		fields := strings.Split(line, idxSep)
-
-		if n := len(fields); n < numFields {
-			fmt.Fprintf(os.Stderr, "Line %d: invalid number of fields: %d\n", lineCount, n)
-			continue
+	go func() {
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			lineCount++
+			tasks <- Task{Index: lineCount, Line: scanner.Text()}
+			runtime.Gosched()
 		}
-
-		namever := fields[0]
-		splitted := strings.Split(fields[1], pathSep)
-		if n := len(splitted); n > 1 {
-			origin := filepath.Join(splitted[n-2:]...)
-			if _, ok := removedOrigs[origin]; ok {
-				if verboseFlag {
-					fmt.Fprintf(os.Stderr, "Line %d: %s (%s) has been removed\n", lineCount, namever, origin)
-				}
-				removedCount++
-				continue
-			}
+		close(tasks)
+		if err = scanner.Err(); err != nil {
+			fmt.Fprintln(os.Stderr, "Error reading index file:", err)
 		}
+	}()
 
-		fields = fields[1:numFields]
-		if origin, ok := strippedOrigins[strip(namever)]; ok {
-			namever = origin
-
-			if described, ok := origins[namever]; ok {
-				updatePath(fields, described, 0, portsDirDefault, 2) // portdir: /usr/ports/.dev/devel/readline -> /usr/ports/devel/readline
-				updatePath(fields, described, 3, portsDirDefault, 3) // description_file: /usr/ports/.dev/devel/readline/pkg-descr -> /usr/ports/devel/readline//pkg-descr
-
-				safeUpdate(fields, 1, described, 1)  // local_prefix
-				safeUpdate(fields, 2, described, 2)  // comment
-				safeUpdate(fields, 4, described, 4)  // maintainer
-				safeUpdate(fields, 5, described, 5)  // categories
-				safeUpdate(fields, 8, described, 11) // www
-			}
-		}
-
-		updateDependency(&fields[6], strippedOrigins, badOsRelDate, osRelDate)  // build_deps
-		updateDependency(&fields[7], strippedOrigins, badOsRelDate, osRelDate)  // run_deps
-		updateDependency(&fields[9], strippedOrigins, badOsRelDate, osRelDate)  // exract_deps
-		updateDependency(&fields[10], strippedOrigins, badOsRelDate, osRelDate) // patch_deps
-		updateDependency(&fields[11], strippedOrigins, badOsRelDate, osRelDate) // fetch_deps
-
-		result := replace(namever, badOsRelDate, osRelDate) + idxSep + strings.Join(fields, idxSep)
-		if line != result {
-			changedCount++
-		}
-
-		if _, err = fmt.Fprintln(tempFile, result); err != nil {
-			panic(err)
-		}
-		writtenCount++
-	}
-
-	if err = scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error reading index file:", err)
-	}
+	readWg.Wait()
+	close(results)
+	writeWg.Wait()
 
 	if changedCount+removedCount > 0 {
 		if err = file.Close(); err != nil {
+			panic(err)
+		}
+		if err = tempWriter.Flush(); err != nil {
 			panic(err)
 		}
 		if err = tempFile.Close(); err != nil {

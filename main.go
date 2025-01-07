@@ -9,7 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/mattn/go-isatty"
 )
@@ -31,8 +34,8 @@ var (
 	versionFlag bool
 
 	rootDir string
-	makeBin string
 
+	makeBin        = "make"
 	pathSep        = string([]byte{os.PathSeparator})
 	errNotExisting = errors.New("entry does not exist")
 )
@@ -109,8 +112,7 @@ func checkFile(path string) error {
 	return nil
 }
 
-func processOrigin(origins map[string][]string, removed map[string]struct{}, portsDir, origin string) []error {
-	var errList []error
+func processOrigin(wp *WorkerPool, removed map[string]struct{}, portsDir, origin, source string) error {
 	var cmdDir string
 	if filepath.IsAbs(origin) {
 		cmdDir = origin
@@ -126,52 +128,19 @@ func processOrigin(origins map[string][]string, removed map[string]struct{}, por
 				return nil
 			}
 		}
-		return []error{fmt.Errorf("%s: %v", cmdDir, err)}
+		return fmt.Errorf("%s: %v", cmdDir, err)
 	}
 
-	if checkFile(filepath.Join(cmdDir, makeFileName)) != nil {
-		return nil
+	if checkFile(filepath.Join(cmdDir, makeFileName)) == nil {
+		wp.AddTask(Task{
+			Origin: origin,
+			Source: source,
+			Cmd:    makeBin,
+			Args:   []string{"-C", cmdDir, "describe"},
+		})
 	}
 
-	cmd := exec.Command(makeBin, "-C", cmdDir, "describe")
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return []error{fmt.Errorf("error creating stdout pipe for %s: %v", origin, err)}
-	}
-
-	if err := cmd.Start(); err != nil {
-		return []error{fmt.Errorf("error starting command for %s: %v", origin, err)}
-	}
-
-	// $(make describe) output's line record format is slightly different from INDEX
-	// 0            1       2            3       4          5          6          7            8          9          10            11       12
-	// name-version|portdir|local_prefix|comment|descr_file|maintainer|categories|extract_deps|patch_deps|fetch_deps|build_depends|run_deps|www
-	lineCount := 0
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		lineCount++
-		fields := strings.Split(scanner.Text(), idxSep)
-		if n := len(fields); n < numFields {
-			errList = append(errList, fmt.Errorf("line %d: invalid number of fields: %d", lineCount, n))
-			continue
-		}
-		origins[fields[0]] = fields[1:numFields]
-	}
-
-	if err := scanner.Err(); err != nil {
-		errList = append(errList, fmt.Errorf("error reading output for %s: %v", origin, err))
-	}
-
-	if err := stdout.Close(); err != nil {
-		errList = append(errList, fmt.Errorf("error closing stdout pipe for %s: %v", origin, err))
-	}
-
-	if err := cmd.Wait(); err != nil {
-		errList = append(errList, fmt.Errorf("wait for %s failed: %v", origin, err))
-	}
-
-	return errList
+	return nil
 }
 
 func rootDirectory() (string, error) {
@@ -223,6 +192,8 @@ func updateDependency(pstr *string, replacements map[string]string, from, to str
 }
 
 func main() {
+	start := time.Now()
+
 	flag.StringVar(&portsDir, "ports-dir", "", "Path to the ports directory")
 	flag.StringVar(&indexFile, "index-file", "", "Path to the index file")
 	flag.BoolVar(&helpFlag, "help", false, "Display help message")
@@ -235,8 +206,10 @@ func main() {
 		os.Exit(0)
 	}
 
+	nCPU := runtime.NumCPU()
+
 	if versionFlag {
-		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit)
+		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit+", nCPUs:", nCPU)
 		os.Exit(0)
 	}
 
@@ -268,9 +241,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "portsDir:\t%s\n", portsDir)
 	}
 
-	origins, removedOrigs := make(map[string][]string), make(map[string]struct{})
+	origins, chanErrors, removedOrigs, wgErrors := make(map[string][]string), make(chan error, nCPU), make(map[string]struct{}), sync.WaitGroup{}
+
+	wgErrors.Add(1)
+	go func() { // [*] read errors from channel and print them to stderr
+		defer wgErrors.Done()
+		for err := range chanErrors {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	}()
+
+	pool := NewWorkerPool(nCPU)
+	pool.Start(origins, &chanErrors)
+
 	for _, origin := range flag.Args() {
-		for _, err = range processOrigin(origins, removedOrigs, portsDir, origin) {
+		if err = processOrigin(pool, removedOrigs, portsDir, origin, "argv"); err != nil {
 			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
 		}
 	}
@@ -278,7 +263,7 @@ func main() {
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			for _, err = range processOrigin(origins, removedOrigs, portsDir, scanner.Text()) {
+			if err = processOrigin(pool, removedOrigs, portsDir, scanner.Text(), "stdin"); err != nil {
 				fmt.Fprintln(os.Stderr, "processOrigin(stdin) error:", err)
 			}
 		}
@@ -287,15 +272,21 @@ func main() {
 		}
 	}
 
+	pool.Stop()       // error writers write unwritten data and stop
+	close(chanErrors) // close channel to end for loop from goroutine [*]
+	wgErrors.Wait()   // wait for goroutine [*] to end
+
+	originLen := len(origins)
 	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "%d origin(s) stored\n", len(origins))
+		fmt.Fprintf(os.Stderr, "%d origin(s) stored\n", originLen)
 	}
 
-	if len(origins) < 1 {
+	if originLen < 1 {
+		fmt.Fprintf(os.Stderr, "%d origin(s) found\n", originLen)
 		return
 	}
 
-	strippedOrigins := make(map[string]string, len(origins))
+	strippedOrigins := make(map[string]string, originLen)
 	for k := range origins {
 		strippedOrigins[strip(k)] = k
 	}
@@ -316,6 +307,9 @@ func main() {
 		tempFile.Close()
 		os.Remove(tempFile.Name())
 	}()
+
+	writer := bufio.NewWriter(tempFile)
+	defer writer.Flush()
 
 	file, err := os.Open(indexFile)
 	if err != nil {
@@ -383,7 +377,7 @@ func main() {
 			changedCount++
 		}
 
-		if _, err = fmt.Fprintln(tempFile, result); err != nil {
+		if _, err = fmt.Fprintln(writer, result); err != nil {
 			panic(err)
 		}
 		writtenCount++
@@ -397,6 +391,9 @@ func main() {
 		if err = file.Close(); err != nil {
 			panic(err)
 		}
+		if err = writer.Flush(); err != nil {
+			panic(err)
+		}
 		if err = tempFile.Close(); err != nil {
 			panic(err)
 		}
@@ -405,11 +402,12 @@ func main() {
 		}
 	}
 
+	duration := time.Since(start).Seconds()
 	if lineCount == writtenCount {
-		fmt.Fprintf(os.Stderr, "%d lines read/written, %d changed, %d removed\n",
-			lineCount, changedCount, removedCount)
+		fmt.Fprintf(os.Stderr, "%d lines read/written, %d changed, %d removed during %.3f seconds\n",
+			lineCount, changedCount, removedCount, duration)
 	} else {
-		fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written\n",
-			lineCount, changedCount, removedCount, writtenCount)
+		fmt.Fprintf(os.Stderr, "%d lines read, %d changed, %d removed, %d written during %.3f seconds\n",
+			lineCount, changedCount, removedCount, writtenCount, duration)
 	}
 }

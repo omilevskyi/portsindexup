@@ -27,3 +27,15 @@ RUN_PARAMETERS?=-ports-dir=/usr/ports-dev -verbose devel/readline
 
 install: .PHONY ${PROJECT_BIN} third_party/port_version.sh
 	install ${.ALLSRC} ${HOME}/bin
+	ls -l ${.ALLSRC:T:S,^,${HOME}/bin/,}
+
+test-run: prepare-run run compare-run .PHONY
+
+prepare-run: .PHONY
+	cp -a /usr/ports-dev/INDEX-14.orig /usr/ports-dev/INDEX-14
+
+compare-run: .PHONY
+	mv /usr/ports-dev/INDEX-14 /usr/ports-dev/INDEX-14.go
+	diff --text -uw --minimal --show-c-function --color=always \
+		/usr/ports-dev/INDEX-14.perl /usr/ports-dev/INDEX-14.go | \
+	less --no-init --chop-long-lines --RAW-CONTROL-CHARS --quit-if-one-screen

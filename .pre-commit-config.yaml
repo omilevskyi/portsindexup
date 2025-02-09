@@ -15,20 +15,20 @@ repos:
       - id: sort-simple-yaml
       - id: check-added-large-files
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.17.1
+    rev: v0.17.2
     hooks:
       - id: markdownlint-cli2
   - repo: https://github.com/zricethezav/gitleaks
-    rev: v8.22.1
+    rev: v8.23.3
     hooks:
       - id: gitleaks
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.30.0
+    rev: 0.31.1
     hooks:
       - id: check-github-actions
       - id: check-github-workflows
   - repo: https://github.com/homebysix/pre-commit-macadmin
-    rev: v1.17.0
+    rev: v1.19.0
     hooks:
       - id: check-git-config-email
         args: ["--domains", "aerlingus.com"]

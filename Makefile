@@ -1,6 +1,6 @@
 SETENV?=	/usr/bin/env
-GO_CMD?=	/usr/local/bin/go
-GOFMT?=		/usr/local/bin/gofmt
+GO_CMD?=	/usr/local/go124/bin/go
+GOFMT?=		/usr/local/go124/bin/gofmt
 GOIMPORTS?=	/usr/local/bin/goimports
 GOSEC?=		/usr/local/bin/gosec
 GIT_BIN?=	/usr/local/bin/git
@@ -47,6 +47,12 @@ run: .PHONY .SILENT
 
 tidy: .PHONY
 	${GO_CMD} mod tidy -v
+
+patch-update: .PHONY
+	${GO_CMD} get -u=patch
+
+update: .PHONY
+	${GO_CMD} get -u
 
 ${PROJECT_BIN}: ${SRCS}
 	${SETENV:D${SETENV} GOPROXY=off${GO_ENV:D ${GO_ENV}}} \

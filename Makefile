@@ -60,6 +60,9 @@ ${PROJECT_BIN}: ${SRCS}
 
 build: .PHONY ${PROJECT_BIN}	## Build the default binary
 
+install-home: .PHONY ${PROJECT_BIN}
+	${INSTALL} -s ${PROJECT_BIN} ${HOME}/bin
+
 fmt: .PHONY	## Format sources
 	${GOIMPORTS} -w .
 	${GOFMT} -w -s .

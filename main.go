@@ -36,7 +36,7 @@ var (
 	rootDir string
 
 	makeBin        = "make"
-	pathSep        = string([]byte{os.PathSeparator})
+	pathSep        = string(os.PathSeparator)
 	errNotExisting = errors.New("entry does not exist")
 )
 
@@ -128,7 +128,7 @@ func processOrigin(wp *WorkerPool, removed map[string]struct{}, portsDir, origin
 				return nil
 			}
 		}
-		return fmt.Errorf("%s: %v", cmdDir, err)
+		return fmt.Errorf("%s: %w", cmdDir, err)
 	}
 
 	if checkFile(filepath.Join(cmdDir, makeFileName)) == nil {
@@ -191,6 +191,22 @@ func updateDependency(pstr *string, replacements map[string]string, from, to str
 	}
 }
 
+func chkErr(err error, rc int, slice ...string) bool {
+	if err != nil {
+		msg, pc := strings.Join(slice, ""), make([]uintptr, 15)
+		f, _ := runtime.CallersFrames(pc[:runtime.Callers(2, pc)]).Next()
+		if msg == "" {
+			msg = "ERROR"
+		}
+		fmt.Fprintf(os.Stderr, "%s:%d %s: %v\n", filepath.Base(f.File), f.Line, msg, err)
+		if rc > 0 {
+			os.Exit(rc)
+		}
+		return true
+	}
+	return false
+}
+
 func main() {
 	start := time.Now()
 
@@ -214,21 +230,16 @@ func main() {
 	}
 
 	var err error
-	if rootDir, err = rootDirectory(); err != nil {
-		panic(err)
-	}
+	rootDir, err = rootDirectory()
+	chkErr(err, 201, "rootDirectory()")
 
 	osRelDate, err := sysCtlUint32("kern.osreldate")
-	if err != nil {
-		panic(err)
-	}
+	chkErr(err, 202, "sysCtlUint32()")
 
 	badOsRelDate := osRelDate[:2] + strings.Repeat("9", len(osRelDate)-2)
 
 	portsDirDefault, err := readStdout(makeBin, []string{"-C", rootDir, "-V", "PORTSDIR"})
-	if err != nil {
-		panic(err)
-	}
+	chkErr(err, 203, "readStdout()")
 
 	if portsDir == "" {
 		portsDir = portsDirDefault
@@ -255,21 +266,15 @@ func main() {
 	pool.Start(origins, &chanErrors)
 
 	for _, origin := range flag.Args() {
-		if err = processOrigin(pool, removedOrigs, portsDir, origin, "argv"); err != nil {
-			fmt.Fprintln(os.Stderr, "processOrigin(argv) error:", err)
-		}
+		chkErr(processOrigin(pool, removedOrigs, portsDir, origin, "argv"), -1, "processOrigin(argv)")
 	}
 
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			if err = processOrigin(pool, removedOrigs, portsDir, scanner.Text(), "stdin"); err != nil {
-				fmt.Fprintln(os.Stderr, "processOrigin(stdin) error:", err)
-			}
+			chkErr(processOrigin(pool, removedOrigs, portsDir, scanner.Text(), "stdin"), -1, "processOrigin(stdin)")
 		}
-		if err = scanner.Err(); err != nil {
-			fmt.Fprintln(os.Stderr, "error reading standard input:", err)
-		}
+		chkErr(scanner.Err(), -1, "scanner.Err()")
 	}
 
 	pool.Stop()       // error writers write unwritten data and stop
@@ -293,28 +298,26 @@ func main() {
 
 	if indexFile == "" {
 		fname, err := readStdout(makeBin, []string{"-C", portsDir, "-V", "INDEXFILE"})
-		if err != nil {
-			panic(err)
-		}
+		chkErr(err, 204, "readStdout()")
 		indexFile = filepath.Join(portsDir, fname)
 	}
 
 	tempFile, err := os.CreateTemp(filepath.Dir(indexFile), filepath.Base(indexFile)+".")
-	if err != nil {
-		panic(err)
-	}
+	chkErr(err, 205, "os.CreateTemp()")
 	defer func() {
+		// nolint:errcheck
 		tempFile.Close()
+		// nolint:errcheck
 		os.Remove(tempFile.Name())
 	}()
 
 	writer := bufio.NewWriter(tempFile)
+	// nolint:errcheck
 	defer writer.Flush()
 
 	file, err := os.Open(indexFile)
-	if err != nil {
-		panic(err)
-	}
+	chkErr(err, 205, "os.Open()")
+	// nolint:errcheck
 	defer file.Close()
 
 	if verboseFlag {
@@ -377,29 +380,18 @@ func main() {
 			changedCount++
 		}
 
-		if _, err = fmt.Fprintln(writer, result); err != nil {
-			panic(err)
-		}
+		_, err = fmt.Fprintln(writer, result)
+		chkErr(err, 207, "fmt.Fprintln()")
 		writtenCount++
 	}
 
-	if err = scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error reading index file:", err)
-	}
+	chkErr(scanner.Err(), -1, "scanner.Err()")
 
 	if changedCount+removedCount > 0 {
-		if err = file.Close(); err != nil {
-			panic(err)
-		}
-		if err = writer.Flush(); err != nil {
-			panic(err)
-		}
-		if err = tempFile.Close(); err != nil {
-			panic(err)
-		}
-		if err = os.Rename(tempFile.Name(), indexFile); err != nil {
-			panic(err)
-		}
+		chkErr(file.Close(), 208, "file.Close()")
+		chkErr(writer.Flush(), 209, "writer.Flush()")
+		chkErr(tempFile.Close(), 210, "tempFile.Close()")
+		chkErr(os.Rename(tempFile.Name(), indexFile), 211, "os.Rename()")
 	}
 
 	duration := time.Since(start).Seconds()

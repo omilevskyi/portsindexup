@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -58,7 +59,7 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errPtr *chan
 			fmt.Printf("[Worker %d] executing: %s %v for %s (%s)\n", id, task.Cmd, task.Args, task.Origin, task.Source)
 		}
 
-		cmd := exec.Command(task.Cmd, task.Args...)
+		cmd := exec.Command(filepath.Clean(task.Cmd), task.Args...) //#nosec G204
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {

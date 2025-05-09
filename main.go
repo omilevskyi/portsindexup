@@ -301,14 +301,13 @@ func main() {
 		chkErr(err, 204, "readStdout()")
 		indexFile = filepath.Join(portsDir, fname)
 	}
+	indexFile = filepath.Clean(indexFile)
 
 	tempFile, err := os.CreateTemp(filepath.Dir(indexFile), filepath.Base(indexFile)+".")
 	chkErr(err, 205, "os.CreateTemp()")
 	defer func() {
-		// nolint:errcheck
-		tempFile.Close()
-		// nolint:errcheck
-		os.Remove(tempFile.Name())
+		_ = tempFile.Close()
+		_ = os.Remove(tempFile.Name())
 	}()
 
 	writer := bufio.NewWriter(tempFile)

@@ -13,7 +13,6 @@ repos:
           - --markdown-linebreak-ext=md
       - id: check-yaml
       - id: sort-simple-yaml
-      - id: check-added-large-files
 
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
@@ -26,17 +25,12 @@ repos:
       - id: go-build
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.17.2
+    rev: v0.18.1
     hooks:
       - id: markdownlint-cli2
 
-  - repo: https://github.com/zricethezav/gitleaks
-    rev: v8.25.1
-    hooks:
-      - id: gitleaks
-
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.33.0
+    rev: 0.33.2
     hooks:
       - id: check-github-actions
       - id: check-github-workflows

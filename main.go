@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-isatty"
+	ut "github.com/omilevskyi/go/pkg/utils"
 )
 
 const (
@@ -50,7 +51,7 @@ func readStdout(cmdPath string, args []string) (string, error) {
 		return "", fmt.Errorf("error setting up stdout pipe: %w", err)
 	}
 
-	if err := command.Start(); err != nil {
+	if err = command.Start(); err != nil {
 		return "", fmt.Errorf("error running the command: %w", err)
 	}
 
@@ -59,11 +60,11 @@ func readStdout(cmdPath string, args []string) (string, error) {
 		output.WriteString(scanner.Text()) // result is concatenated strings without \n
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err = scanner.Err(); err != nil {
 		return "", fmt.Errorf("error reading command output: %w", err)
 	}
 
-	if err := command.Wait(); err != nil {
+	if err = command.Wait(); err != nil {
 		return "", fmt.Errorf("error waiting for command to finish: %w", err)
 	}
 
@@ -71,15 +72,22 @@ func readStdout(cmdPath string, args []string) (string, error) {
 }
 
 func strip(input string) string {
-	if pos := strings.LastIndexByte(input, '-'); pos >= 0 {
-		return input[:pos+1]
+	for i := len(input) - 1; i >= 0; i-- {
+		if input[i] == '-' {
+			return input[:i+1]
+		}
 	}
 	return input
 }
 
 func replace(source, search, replace string) string {
 	if pos := strings.Index(source, search); pos >= 0 {
-		return source[:pos] + replace + source[pos+len(search):]
+		var b strings.Builder
+		b.Grow(len(source) - len(search) + len(replace))
+		b.WriteString(source[:pos])
+		b.WriteString(replace)
+		b.WriteString(source[pos+len(search):])
+		return b.String()
 	}
 	return source
 }
@@ -143,20 +151,6 @@ func processOrigin(wp *WorkerPool, removed map[string]struct{}, portsDir, origin
 	return nil
 }
 
-func rootDirectory() (string, error) {
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		parentDir := filepath.Dir(currentDir)
-		if currentDir == parentDir {
-			return currentDir, nil
-		}
-		currentDir = parentDir
-	}
-}
-
 func updatePath(dst, src []string, idx int, prefix string, count int) {
 	if idx < len(src) && idx < len(dst) && src[idx] != "" {
 		splitted := strings.Split(src[idx], pathSep)
@@ -191,22 +185,6 @@ func updateDependency(pstr *string, replacements map[string]string, from, to str
 	}
 }
 
-func chkErr(err error, rc int, slice ...string) bool {
-	if err != nil {
-		msg, pc := strings.Join(slice, ""), make([]uintptr, 15)
-		f, _ := runtime.CallersFrames(pc[:runtime.Callers(2, pc)]).Next()
-		if msg == "" {
-			msg = "ERROR"
-		}
-		fmt.Fprintf(os.Stderr, "%s:%d %s: %v\n", filepath.Base(f.File), f.Line, msg, err)
-		if rc > 0 {
-			os.Exit(rc)
-		}
-		return true
-	}
-	return false
-}
-
 func main() {
 	start := time.Now()
 
@@ -222,24 +200,24 @@ func main() {
 		os.Exit(0)
 	}
 
-	nCPU := runtime.NumCPU()
+	numProcs := runtime.GOMAXPROCS(0)
 
 	if versionFlag {
-		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit+", nCPUs:", nCPU)
+		fmt.Fprintln(os.Stderr, "Version: "+version+", Commit: "+gitCommit+", nCPUs:", numProcs)
 		os.Exit(0)
 	}
 
 	var err error
-	rootDir, err = rootDirectory()
-	chkErr(err, 201, "rootDirectory()")
+	rootDir, err = ut.RootDirectory()
+	ut.IsErr(err, 201, "rootDirectory()")
 
 	osRelDate, err := sysCtlUint32("kern.osreldate")
-	chkErr(err, 202, "sysCtlUint32()")
+	ut.IsErr(err, 202, "sysCtlUint32()")
 
 	badOsRelDate := osRelDate[:2] + strings.Repeat("9", len(osRelDate)-2)
 
 	portsDirDefault, err := readStdout(makeBin, []string{"-C", rootDir, "-V", "PORTSDIR"})
-	chkErr(err, 203, "readStdout()")
+	ut.IsErr(err, 203, "readStdout()")
 
 	if portsDir == "" {
 		portsDir = portsDirDefault
@@ -252,7 +230,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "portsDir:\t%s\n", portsDir)
 	}
 
-	origins, chanErrors, removedOrigs, wgErrors := make(map[string][]string), make(chan error, nCPU), make(map[string]struct{}), sync.WaitGroup{}
+	origins, chanErrors, removedOrigs, wgErrors := make(map[string][]string), make(chan error, numProcs), make(map[string]struct{}), sync.WaitGroup{}
 
 	wgErrors.Add(1)
 	go func() { // [*] read errors from channel and print them to stderr
@@ -262,19 +240,19 @@ func main() {
 		}
 	}()
 
-	pool := NewWorkerPool(nCPU)
+	pool := NewWorkerPool(numProcs)
 	pool.Start(origins, &chanErrors)
 
 	for _, origin := range flag.Args() {
-		chkErr(processOrigin(pool, removedOrigs, portsDir, origin, "argv"), -1, "processOrigin(argv)")
+		ut.IsErr(processOrigin(pool, removedOrigs, portsDir, origin, "argv"), -1, "processOrigin(argv)")
 	}
 
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			chkErr(processOrigin(pool, removedOrigs, portsDir, scanner.Text(), "stdin"), -1, "processOrigin(stdin)")
+			ut.IsErr(processOrigin(pool, removedOrigs, portsDir, scanner.Text(), "stdin"), -1, "processOrigin(stdin)")
 		}
-		chkErr(scanner.Err(), -1, "scanner.Err()")
+		ut.IsErr(scanner.Err(), -1, "scanner.Err()")
 	}
 
 	pool.Stop()       // error writers write unwritten data and stop
@@ -298,13 +276,13 @@ func main() {
 
 	if indexFile == "" {
 		fname, err := readStdout(makeBin, []string{"-C", portsDir, "-V", "INDEXFILE"})
-		chkErr(err, 204, "readStdout()")
+		ut.IsErr(err, 204, "readStdout()")
 		indexFile = filepath.Join(portsDir, fname)
 	}
 	indexFile = filepath.Clean(indexFile)
 
 	tempFile, err := os.CreateTemp(filepath.Dir(indexFile), filepath.Base(indexFile)+".")
-	chkErr(err, 205, "os.CreateTemp()")
+	ut.IsErr(err, 205, "os.CreateTemp()")
 	defer func() {
 		_ = tempFile.Close()
 		_ = os.Remove(tempFile.Name())
@@ -315,7 +293,7 @@ func main() {
 	defer writer.Flush()
 
 	file, err := os.Open(indexFile)
-	chkErr(err, 205, "os.Open()")
+	ut.IsErr(err, 205, "os.Open()")
 	// nolint:errcheck
 	defer file.Close()
 
@@ -380,17 +358,17 @@ func main() {
 		}
 
 		_, err = fmt.Fprintln(writer, result)
-		chkErr(err, 207, "fmt.Fprintln()")
+		ut.IsErr(err, 207, "fmt.Fprintln()")
 		writtenCount++
 	}
 
-	chkErr(scanner.Err(), -1, "scanner.Err()")
+	ut.IsErr(scanner.Err(), -1, "scanner.Err()")
 
 	if changedCount+removedCount > 0 {
-		chkErr(file.Close(), 208, "file.Close()")
-		chkErr(writer.Flush(), 209, "writer.Flush()")
-		chkErr(tempFile.Close(), 210, "tempFile.Close()")
-		chkErr(os.Rename(tempFile.Name(), indexFile), 211, "os.Rename()")
+		ut.IsErr(file.Close(), 208, "file.Close()")
+		ut.IsErr(writer.Flush(), 209, "writer.Flush()")
+		ut.IsErr(tempFile.Close(), 210, "tempFile.Close()")
+		ut.IsErr(os.Rename(tempFile.Name(), indexFile), 211, "os.Rename()")
 	}
 
 	duration := time.Since(start).Seconds()

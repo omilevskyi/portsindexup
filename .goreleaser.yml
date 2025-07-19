@@ -23,12 +23,13 @@ builds:
       - freebsd
     goarch:
       - amd64
+      - arm64
       - 386
 
 # https://goreleaser.com/customization/archive/
 archives:
   - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: zip
+    formats: ["zip"]
     strip_binary_directory: true
     files: []
 

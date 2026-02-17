@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	ut "github.com/omilevskyi/go/pkg/utils"
 )
 
 // Task -
@@ -64,14 +66,14 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errPtr *chan
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			if errPtr != nil {
-				*errPtr <- fmt.Errorf("error creating stdout pipe for %s (%s): %w", task.Origin, task.Source, err)
+				*errPtr <- fmt.Errorf("%s: error creating stdout pipe for %s (%s): %w", ut.CallSite(), task.Origin, task.Source, err)
 			}
 			return
 		}
 
 		if err := cmd.Start(); err != nil {
 			if errPtr != nil {
-				*errPtr <- fmt.Errorf("error starting command for %s (%s): %w", task.Origin, task.Source, err)
+				*errPtr <- fmt.Errorf("%s: error starting command for %s (%s): %w", ut.CallSite(), task.Origin, task.Source, err)
 			}
 			return
 		}
@@ -86,7 +88,7 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errPtr *chan
 			fields := strings.Split(scanner.Text(), idxSep)
 			if n := len(fields); n < numFields {
 				if errPtr != nil {
-					*errPtr <- fmt.Errorf("command for %s (%s), line %d: invalid number of fields: %d", task.Origin, task.Source, lineCount, n)
+					*errPtr <- fmt.Errorf("%s: command for %s (%s), line %d: invalid number of fields: %d", ut.CallSite(), task.Origin, task.Source, lineCount, n)
 				}
 				continue
 			}
@@ -96,17 +98,17 @@ func (wp *WorkerPool) worker(id int, stdoutMap map[string][]string, errPtr *chan
 		}
 
 		if err := scanner.Err(); err != nil && errPtr != nil {
-			*errPtr <- fmt.Errorf("error reading stdout for %s (%s): %w", task.Origin, task.Source, err)
+			*errPtr <- fmt.Errorf("%s: error reading stdout for %s (%s): %w", ut.CallSite(), task.Origin, task.Source, err)
 		}
 
 		// looks like cmd.Wait() closes both stdout and stderr
 		if err := cmd.Wait(); err != nil && errPtr != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-					*errPtr <- fmt.Errorf("command for %s (%s) exited with code: %d", task.Origin, task.Source, status.ExitStatus())
+					*errPtr <- fmt.Errorf("%s: command for %s (%s) exited with code: %d", ut.CallSite(), task.Origin, task.Source, status.ExitStatus())
 				}
 			} else {
-				*errPtr <- fmt.Errorf("wait for %s (%s) failed: %w", task.Origin, task.Source, err)
+				*errPtr <- fmt.Errorf("%s: wait for %s (%s) failed: %w", ut.CallSite(), task.Origin, task.Source, err)
 			}
 		}
 	}

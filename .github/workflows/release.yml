@@ -52,6 +52,8 @@ jobs:
           cache-dependency-path: "go.sum"
           check-latest: true
           cache: true
+      - name: Disable Go telemetry
+        run: go telemetry off
       - name: Run tests
         if: steps.version.outputs.next != ''
         run: go test -v ./...

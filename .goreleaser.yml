@@ -8,6 +8,7 @@ builds:
     binary: ".build/{{ .ProjectName }}"
     env:
       - CGO_ENABLED=0
+      - GOEXPERIMENT=nogreenteagc,norandomizedheapbase64
     mod_timestamp: "{{ .CommitTimestamp }}" # https://goreleaser.com/customization/templates/
     flags:
       - -trimpath
@@ -15,7 +16,7 @@ builds:
     tags:
       - static_build
     ldflags:
-      - -s -w -extldflags -static
+      - -s -w
       - -X main.version=v{{ .Version }}
       - -X main.gitCommit={{ .ShortCommit }}
       - -X main.makeBin=/usr/bin/make
@@ -46,6 +47,7 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^ci:"
       - Merge pull request
       - Merge branch
 

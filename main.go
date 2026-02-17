@@ -48,11 +48,11 @@ func readStdout(cmdPath string, args []string) (string, error) {
 
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("error setting up stdout pipe: %w", err)
+		return "", fmt.Errorf("%s: error setting up stdout pipe: %w", ut.CallSite(), err)
 	}
 
 	if err = command.Start(); err != nil {
-		return "", fmt.Errorf("error running the command: %w", err)
+		return "", fmt.Errorf("%s: error running the command: %w", ut.CallSite(), err)
 	}
 
 	scanner := bufio.NewScanner(stdout)
@@ -61,11 +61,11 @@ func readStdout(cmdPath string, args []string) (string, error) {
 	}
 
 	if err = scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading command output: %w", err)
+		return "", fmt.Errorf("%s: error reading command output: %w", ut.CallSite(), err)
 	}
 
 	if err = command.Wait(); err != nil {
-		return "", fmt.Errorf("error waiting for command to finish: %w", err)
+		return "", fmt.Errorf("%s: error waiting for command to finish: %w", ut.CallSite(), err)
 	}
 
 	return output.String(), nil
@@ -98,10 +98,10 @@ func checkDir(path string) error {
 		if os.IsNotExist(err) {
 			return errNotExisting
 		}
-		return fmt.Errorf("error accessing: %w", err)
+		return fmt.Errorf("%s: error accessing: %w", ut.CallSite(), err)
 	}
 	if !info.IsDir() {
-		return errors.New("path is not a directory")
+		return fmt.Errorf("%s: path is not a directory", ut.CallSite())
 	}
 	return nil
 }
@@ -112,10 +112,10 @@ func checkFile(path string) error {
 		if os.IsNotExist(err) {
 			return errNotExisting
 		}
-		return fmt.Errorf("error accessing: %w", err)
+		return fmt.Errorf("%s: error accessing: %w", ut.CallSite(), err)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.New("path is not a file")
+		return fmt.Errorf("%s: path is not a file", ut.CallSite())
 	}
 	return nil
 }
@@ -136,7 +136,7 @@ func processOrigin(wp *WorkerPool, removed map[string]struct{}, portsDir, origin
 				return nil
 			}
 		}
-		return fmt.Errorf("%s: %w", cmdDir, err)
+		return fmt.Errorf("%s: %s: %w", ut.CallSite(), cmdDir, err)
 	}
 
 	if checkFile(filepath.Join(cmdDir, makeFileName)) == nil {

@@ -1,6 +1,9 @@
 *.log
 *.bak*
 *.orig*
-.build/
-.vscode/
+*.png
+.*/
+Makefile
+Makefile.local
+portsindexup
 vendor/

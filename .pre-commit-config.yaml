@@ -1,18 +1,25 @@
 ---
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+  - repo: builtin
     hooks:
       - id: check-case-conflict
       - id: check-merge-conflict
+      - id: check-illegal-windows-names
+      - id: check-executables-have-shebangs
+      - id: check-symlinks
       - id: destroyed-symlinks
       - id: detect-private-key
       - id: end-of-file-fixer
       - id: trailing-whitespace
         args:
           - --markdown-linebreak-ext=md
+      - id: check-json
+      - id: check-toml
       - id: check-yaml
-      - id: sort-simple-yaml
+      - id: no-commit-to-branch
+      - id: mixed-line-ending
+        args:
+          - --fix=lf
 
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
@@ -25,13 +32,13 @@ repos:
       - id: go-build
 
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.36.2
+    rev: 0.37.2
     hooks:
       - id: check-github-actions
       - id: check-github-workflows
 
   - repo: https://github.com/homebysix/pre-commit-macadmin
-    rev: v1.22.1
+    rev: v1.24.1
     hooks:
       - id: check-git-config-email
         args: ["--domains", "aerlingus.com"]

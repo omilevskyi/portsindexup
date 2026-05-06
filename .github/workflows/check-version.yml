@@ -1,32 +1,44 @@
 ---
 name: Check version
+
 on:
   push:
     branches-ignore:
-      - "main"
+      - main
+
+permissions:
+  contents: read
+
 jobs:
   check-version:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    runs-on: ubuntu-24.04
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event.pull_request.head.sha }} # pick PR's HEAD instead of merge commit
+          fetch-depth: 0
           show-progress: "false"
-      - name: Get next version
+
+      - name: Save commit message to file
+        id: commit
         run: |
-          msg=$(git log -1 --format=%B | head -1)
-          if echo "${msg}" | grep --quiet '^fix[^[:space:]:]*:'; then
-            version_bump=patch
-          elif echo "${msg}" | grep --quiet '^feat[^[:space:]:]*:'; then
-            version_bump=minor
-          elif echo "${msg}" | grep --quiet '^BREAKING CHANGE[^[:space:]:]*:'; then
-            version_bump=major
-          else
-            exit 0
-          fi
-          recent_version=$(git tag --sort -version:refname | sed --silent --regexp-extended 's/.*(v[[:digit:].]+)$/\1/p;q')
-          next_version=$(curl --silent https://raw.githubusercontent.com/fsaintjacques/semver-tool/master/src/semver |
-            bash -s bump ${version_bump} ${recent_version:-v0.0.0})
-          test -n "${next_version}" || exit 201
+          FILE=$(mktemp --tmpdir=${{ runner.temp }})
+          set -o pipefail && git --no-pager log -1 --no-color --pretty=%B | tee "${FILE}"
+          echo "file=${FILE}" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify if commit is conventional
+        uses: cocogitto/cocogitto-action@52d0023b4396897f1815648e553db2ab8d782f3a # v4.2.0
+        with:
+          command: verify
+          args: --ignore-merge-commits --ignore-fixup-commits --file ${{ steps.commit.outputs.file }}
+
+      - name: Remove temporary file
+        run: rm --force -- ${{ steps.commit.outputs.file }}
+
+      - name: Get next version
+        id: version
+        run: |
+          NEXT=$(cog bump --auto --dry-run | sed --silent --regexp-extended 's/^v([[:digit:].]+)$/\1/p')
+          echo "next=${NEXT}" >>"${GITHUB_OUTPUT}"
